@@ -669,10 +669,11 @@ trans.table = function(pid, langs, rows) {
   }
   
   // list of contributors
-  let cells = thead.rows[0].cells;
-  let tfoot = document.createElement('TFOOT');
-  table.appendChild(tfoot);
   if (user.admin) {
+    let cells = thead.rows[0].cells;
+    let tfoot = document.createElement('TFOOT');
+    table.appendChild(tfoot);
+    
     let fr = document.createElement('TR');
     tfoot.appendChild(fr);
     let td1 = document.createElement('TD');
@@ -695,25 +696,26 @@ trans.table = function(pid, langs, rows) {
     td3.appendChild(button);
     
     menu.sync();
-  }
-  let fr = document.createElement('TR');
-  tfoot.appendChild(fr);
-  for (let i = 0; i < cells.length; i++) {
-    let h = cells[i].headers;
-    let td = document.createElement('TD');
-    fr.appendChild(td);
-    if (h && locales[h]) {
-      let users = [];
-      for (let k in contrib[h]) {
-        let u = contrib[h][k];
-        if (k > 0)
-          users.push(`<a href="http://steamcommunity.com/profiles/${u.steam_id}">${u.username}</a> (${u.count})`);
-        else
-          users.push(`anonymous (${u.count})`);
-      }
-      if (users.length > 0) {
-        td.className = 'posts small';
-        td.innerHTML = users.join(", ");
+    
+    let fr2 = document.createElement('TR');
+    tfoot.appendChild(fr2);
+    for (let i = 0; i < cells.length; i++) {
+      let h = cells[i].headers;
+      let td = document.createElement('TD');
+      fr2.appendChild(td);
+      if (h && locales[h]) {
+        let users = [];
+        for (let k in contrib[h]) {
+          let u = contrib[h][k];
+          if (k > 0)
+            users.push(`<a href="http://steamcommunity.com/profiles/${u.steam_id}">${u.username}</a> (${u.count})`);
+          else
+            users.push(`anonymous (${u.count})`);
+        }
+        if (users.length > 0) {
+          td.className = 'posts small';
+          td.innerHTML = users.join(", ");
+        }
       }
     }
   }

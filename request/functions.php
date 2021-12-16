@@ -113,6 +113,7 @@ function get_found_rows($db)
 
 function get_text($db, $id, $fields, $langs, $limit = 10000, $offset = 0)
 {
+  $html = in_array('u.username', $fields);
   $fields = implode(',', $fields);
   $langs = implode(',', $langs);
   $res = db_query($db, 
@@ -132,7 +133,11 @@ function get_text($db, $id, $fields, $langs, $limit = 10000, $offset = 0)
       AND (t.id = $id OR t.parent_id = $id)
     ORDER BY FIELD(t.id, $id) DESC, t.id ASC
     LIMIT $limit OFFSET $offset");
-  return mysqli_fetch_all($res, MYSQLI_ASSOC);
+  $list = mysqli_fetch_all($res, MYSQLI_ASSOC);
+  if ($html)
+    for ($i = 0; $i < count($list); $i++)
+      $list[$i]['username'] = htmlentities($list[$i]['username']);
+  return $list;
 }
 
 function set_label($db, $id, $label, $poster_id)
@@ -163,6 +168,7 @@ function set_text($db, $id, $lang, $string, $poster_id)
 
 function get_users($db, $id, $fields, $limit = 10000, $offset = 0)
 {
+  $html = in_array('u.username', $fields);
   $fields = implode(',', $fields);
   $res = db_query($db,
   "SELECT $fields
@@ -170,7 +176,11 @@ function get_users($db, $id, $fields, $limit = 10000, $offset = 0)
     WHERE user_id = $id
       OR $id = 0
     LIMIT $limit OFFSET $offset");
-  return mysqli_fetch_all($res, MYSQLI_ASSOC);
+  $list = mysqli_fetch_all($res, MYSQLI_ASSOC);
+  if ($html)
+    for ($i = 0; $i < count($list); $i++)
+      $list[$i]['username'] = htmlentities($list[$i]['username']);
+  return $list;
 }
 
 function get_stats($db, $id)
