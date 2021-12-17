@@ -542,9 +542,9 @@ trans.row = function(id, data) {
     if (v) {
       td.appendChild(document.createTextNode(v.string));
       if (v.posted && v.string) {
-        let uu = v.username || 'anonymous';
-        let dd = timediff(v.posted);
-        td.title = `${uu}\n${dd}`;
+        td.title = timediff(v.posted);
+        if (user.admin)
+          td.title = (v.username || 'anonymous') + '\n' + td.title;
       }
     }
     td.setAttribute('data-href', `javascript:trans.select(${id}, '${i}');`);
