@@ -135,7 +135,9 @@ const formats = {
 const actions = {
   'default': 'With selected...',
   'remove': 'Remove',
-  'group': 'Group'
+  'group': 'Group',
+  'approve': 'Approve',
+  'unapprove': 'Unapprove'
 }
 
 var menu = document.createElement('SELECT');
@@ -159,10 +161,8 @@ menu.sync = function() {
 menu.onchange = function() {
   let s = trans.selection('true');
   let v = this.value;
-  if (v == "remove")
-    trans.remove(s);
-  else if (v == "group")
-    trans.group(s);
+  if (trans[v])
+    trans[v](s);
   else
     trans.expo(v);
 }
@@ -205,8 +205,8 @@ trans.remove = function(ids) {
   if (n == 0) return;
   if (confirm('Delete '+n+' items?') != true)
     return;
-  var req = [{'func':'delete_terms','ids':ids}];
-  trans.post(req, function(code, res) {
+  var req = {'func':'delete_terms','ids':ids};
+  trans.post([req], function(code, res) {
     // response
     if (code != 200)
       return;
@@ -215,6 +215,37 @@ trans.remove = function(ids) {
       params.delete("r");
     trans.load();
   });
+}
+
+trans.setapproved = function(ids, ok) {
+  let c = params.get('c');
+  c = c.split('-');
+  let action = (ok) ? 'Approve' : 'Unapprove';
+  let chosen = [];
+  for (let i = 0; i < c.length; i++)
+    if (confirm(action+' '+ids.length+' terms in '+locales[c[i]][1]+'?'))
+      chosen.push(c[i]);
+  // ignore base language
+  //const index = c.indexOf(base);
+  //if (index > -1)
+    //c.splice(index, 1);
+  if (ids.length == 0 || chosen.length == 0)
+    return;
+  var req = {'func':'set_approved','ids':ids,'langs':chosen,'approve':ok};
+  trans.post([req], function(code, res) {
+    // response
+    if (code != 200)
+      return;
+    trans.load();
+  });
+}
+
+trans.approve = function(ids) {
+  trans.setapproved(ids, true);
+}
+
+trans.unapprove = function(ids) {
+  trans.setapproved(ids, false);
 }
 
 trans.group = function(ids) {
@@ -264,8 +295,8 @@ trans.signin = function() {
 
 trans.signout = function() {
   // request
-  let req = [{ 'func':'auth_logout' }];
-  trans.post(req, function(code, res) {
+  let req = { 'func':'auth_logout' };
+  trans.post([req], function(code, res) {
     // response
     params.delete('s');
     window.location.href = url.href;
@@ -441,6 +472,88 @@ trans.edit = function(pid, langs, replace) {
   });
 }
 
+trans.profile = function(replace) {
+  params.set('r', 'profile');
+  params.delete('c');
+  let st = { eval:`javascript:trans.profile(true);` };
+  let func = (replace) ? 'replaceState' : 'pushState';
+  window.history[func](st, '', url.pathname+url.search);
+
+  let title = 'Edit Profile';
+  let header = `<a href='javascript:trans.stats(0, false);'><img src="img/back.png" alt="Back" class="icon"></a> Profile`;
+  let body = document.createElement('DIV');
+  let consent = (user.consent) ? 'checked' : '';
+  let credit = (user.credit) ? 'checked' : '';
+  let name = user.name ? user.name : '';
+  body.innerHTML = `
+    <div class="padded">
+      <h2>Do you grant permission for publishing your contributions?</h2>
+      <h4 id="consent_header" class="padded">
+        <input type="checkbox" ${consent} id="consent" onclick="trans.syncme();"> I declare that my contributions do not contain copyrighted material or personal information (required)
+      </h4>
+
+      <h2>Would you like to be credited publicly?</h2>
+      <b>Credits name or nickname</b><br>
+      <input type="text" value="${name}" id="name" class="padded" onkeydown="trans.syncme();" onchange="trans.syncme();"></input>
+      <h4 class="padded">
+        <input type="checkbox" ${credit} id="credit" onclick="trans.syncme();"> I consent to the use of the name specified above publicly in games, applications and on the web (optional)
+      </h4>
+      
+      <h2>Changed your mind?</h2>
+      <div class="padded">
+        <b>You can permanently <a href="javascript:trans.deleteme();">delete account</a> and remove your contributions at any time.</b>
+      </div>
+    </div>
+  `;
+  trans.page(title, header, body);
+  const consent_header = document.getElementById('consent_header');
+  if (!user.consent)
+    consent_header.className = 'padded error';
+}
+
+trans.syncme = function(e) {
+  const check1 = document.getElementById('consent');
+  const check2 = document.getElementById('credit');
+  const name = document.getElementById('name');
+  var req = [    
+    {'func':'set_consent','approve':check1.checked},
+    {'func':'set_credit','approve':check2.checked},
+    {'func':'set_name','name':name.value}
+  ];
+  trans.post(req, function(code, res) {
+    // response
+    if (code != 200)
+      return;
+    user.consent = check1.checked;
+    user.credit = check1.credit;
+    user.name = name.value;
+    const consent_header = document.getElementById('consent_header');
+    consent_header.className = user.consent ? 'padded' : 'error padded';
+  });
+}
+
+trans.credit = function(e) {
+  e.disabled = true;
+  var req = {'func':'set_credit','approve':e.checked};
+}
+
+trans.deleteme = function() {
+  if (!confirm("Delete your account and contributions?"))
+    return;
+  let verify = prompt("Please type in the word \"delete\" to delete your account and permanently remove your contributions");
+  if (verify && verify == "delete") {
+    var req = {'func':'delete_me'};
+    trans.post([req], function(code, res) {
+      // response
+      if (code != 200)
+        return;
+      alert("Your account and contributions have been deleted");
+      location.href = "?";
+    });
+    return;
+  }
+}
+
 trans.page = function(title, header, body) {
   // page title
   document.title = title;
@@ -451,12 +564,16 @@ trans.page = function(title, header, body) {
   let login = document.createElement('DIV');
   login.style['float'] = 'right';
   login.style['text-align'] = 'right';
+  login.style['width'] = '200px';
 
   // avatar image and username
   let avatar = user.avatar;
   if (!avatar)
     avatar = 'img/nouser.jpg';
-  login.innerHTML = `<img src="${avatar}" class="avatar" alt="Steam Avatar"> <b>${user.username}</b><br>`;
+  let profile = 'javascript:trans.profile(false);';
+  if (!user.user_id)
+    profile = 'javascript:trans.auth();';
+  login.innerHTML = `<a href="${profile}"><img src="${avatar}" class="avatar" alt="Steam Avatar"></a> <b>${user.username}</b><br>`;
   if (!user.user_id)
     login.innerHTML += `<a href="javascript:trans.auth();">Sign-in</a>`;
   else
@@ -538,9 +655,10 @@ trans.row = function(id, data) {
     let td = document.createElement('TD');
     tr.appendChild(td);
     td.headers = h;
-    let v = data ? data[h][id] : null;
+    let v = (data) ? data[h][id] : null;
     if (v) {
-      td.appendChild(document.createTextNode(v.string));
+      //td.appendChild(document.createTextNode(v.string));
+      td.innerHTML = v.string;
       if (v.posted && v.string) {
         td.title = timediff(v.posted);
         if (user.admin)
@@ -564,9 +682,13 @@ trans.row = function(id, data) {
   let v = (data) ? data.label[id] : null;
   let pid = params.get("r");
   if (v && v.count > 0 && pid != id) {
+    let langs = params.get('c');
+    langs = langs.replace(/,/g,'-').split('-');
+    let cc = '["'+langs.join('","')+'"]';
     td.className = 'group';
     td.innerHTML = v.count+' more';
-    td.setAttribute('data-href', `javascript:params.set("r",${id}); trans.load();`);
+    //td.setAttribute('data-href', `javascript:params.set("r",${id}); trans.load();`);
+    td.setAttribute('data-href', `javascript:trans.edit(${id}, ${cc}, false);`);
   }
 }
 
@@ -726,6 +848,10 @@ trans.select = function(id, c) {
     trans.auth();
     return;
   }
+  if (!user.consent) {
+    trans.profile();
+    return;
+  }
   let tr = document.getElementById(id);
   let cells = tr.cells;
   let td = cells[c];
@@ -801,7 +927,11 @@ trans.load = function() {
   let rid = params.get('r');
   if (rid == null)
     rid = 0;
-
+  
+  if (rid == 'profile' || !user.consent) {
+    trans.profile(true);
+    return;
+  }
   let langs = params.get('c');
   if (langs) {
     // edit specified languages
@@ -822,8 +952,11 @@ if (session) {
   trans.get(req, function(code, res) {
     if (code == 200) {
       let json = JSON.parse(res);
-      if (json && json[0])
+      if (json && json[0]) {
         user = json[0];
+        user.consent = user.consent == '1';
+        user.credit = user.credit == '1';
+      }
     }
     trans.load();
   });

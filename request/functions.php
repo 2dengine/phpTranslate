@@ -88,6 +88,14 @@ function delete_terms($db, $ids, $owner_id)
   return true;
 }
 
+function delete_me($db, $owner_id) {
+  if (!$owner_id || $owner_id == 1)
+    throw new ErrorException('Unauthorized', 401);
+  db_query($db, "DELETE FROM `revisions` WHERE poster_id = $owner_id");
+  db_query($db, "DELETE FROM `users` WHERE user_id = $owner_id");
+  return true;
+}
+
 function group_terms($db, $ids, $owner_id)
 {
   if (!$owner_id)
@@ -113,7 +121,6 @@ function get_found_rows($db)
 
 function get_text($db, $id, $fields, $langs, $limit = 10000, $offset = 0)
 {
-  $html = in_array('u.username', $fields);
   $fields = implode(',', $fields);
   $langs = implode(',', $langs);
   $res = db_query($db, 
@@ -133,11 +140,30 @@ function get_text($db, $id, $fields, $langs, $limit = 10000, $offset = 0)
       AND (t.id = $id OR t.parent_id = $id)
     ORDER BY FIELD(t.id, $id) DESC, t.id ASC
     LIMIT $limit OFFSET $offset");
-  $list = mysqli_fetch_all($res, MYSQLI_ASSOC);
-  if ($html)
-    for ($i = 0; $i < count($list); $i++)
-      $list[$i]['username'] = htmlentities($list[$i]['username']);
-  return $list;
+  return mysqli_fetch_all($res, MYSQLI_ASSOC);
+}
+
+function set_approved($db, $ids, $langs, $approved, $owner_id = 0)
+{
+  if ($owner_id != 1)
+    throw new ErrorException('Unauthorized', 401);
+  if (!is_array($ids))
+    $ids = [$ids];
+  $set = implode(',', $ids);
+  $langs = implode(',', $langs);
+  $status = ($approved) ? 'TRUE' : 'FALSE';
+  db_query($db, "UPDATE `revisions` AS r
+    LEFT OUTER JOIN `revisions` AS r2
+      ON (r.term_id = r2.term_id)
+      AND (r.locale = r2.locale)
+      AND (r.posted < r2.posted)
+    SET
+      r.approved = $status
+    WHERE
+      ISNULL(r2.posted)
+      AND r.term_id IN ($set)
+      AND r.locale IN ($langs)");
+  return true;
 }
 
 function set_label($db, $id, $label, $poster_id)
@@ -166,9 +192,28 @@ function set_text($db, $id, $lang, $string, $poster_id)
   return true;
 }
 
+function set_consent($db, $on, $owner_id)
+{
+  $bool = ($on) ? 'TRUE' : 'FALSE';
+  db_query($db, "UPDATE `users` SET consent = $bool, consent_stamp = NOW() WHERE user_id = $owner_id");
+  return true;
+}
+
+function set_credit($db, $on, $owner_id)
+{
+  $bool = ($on) ? 'TRUE' : 'FALSE';
+  db_query($db, "UPDATE `users` SET credit = $bool, credit_stamp = NOW() WHERE user_id = $owner_id");
+  return true;
+}
+
+function set_name($db, $string, $owner_id)
+{
+  db_query($db, "UPDATE `users` SET name = '$string' WHERE user_id = $owner_id");
+  return true;
+}
+
 function get_users($db, $id, $fields, $limit = 10000, $offset = 0)
 {
-  $html = in_array('u.username', $fields);
   $fields = implode(',', $fields);
   $res = db_query($db,
   "SELECT $fields
@@ -176,11 +221,7 @@ function get_users($db, $id, $fields, $limit = 10000, $offset = 0)
     WHERE user_id = $id
       OR $id = 0
     LIMIT $limit OFFSET $offset");
-  $list = mysqli_fetch_all($res, MYSQLI_ASSOC);
-  if ($html)
-    for ($i = 0; $i < count($list); $i++)
-      $list[$i]['username'] = htmlentities($list[$i]['username']);
-  return $list;
+  return mysqli_fetch_all($res, MYSQLI_ASSOC);
 }
 
 function get_stats($db, $id)
@@ -313,7 +354,7 @@ function auth_status($db, $session)
   $user_id = resume($db, $session);
   if (!$user_id)
     return 0;
-  $rows = get_users($db, $user_id, ['user_id','username','session','avatar']);
+  $rows = get_users($db, $user_id, ['user_id','username','session','avatar','consent','consent_stamp','credit','credit_stamp','name']);
   if (count($rows) == 0)
     return 0;
   return $rows[0];

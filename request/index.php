@@ -3,7 +3,7 @@ try
 {
   require('fields.php');
   require('langs.php');
-  
+
   $api = array
   (
     'get_text'=>['GET','id','fields','langs','limit'],
@@ -11,9 +11,14 @@ try
     'get_stats'=>['GET','id'],
     'get_path'=>['GET','id'],
     'set_text'=>['POST','id','lang','string'],
+    'set_approved'=>['POST','ids','langs','approve'],
+    'set_consent'=>['POST','approve'],
+    'set_credit'=>['POST','approve'],
+    'set_name'=>['POST','name'],
     'append_term'=>['POST','id','label'],
     'set_label'=>['POST','id','label'],
     'delete_terms'=>['POST','ids'],
+    'delete_me'=>['POST'],
     'group_terms'=>['POST','ids'],
     'auth_login'=>['GET','url'],
     'auth_logout'=>['POST'],
@@ -22,28 +27,51 @@ try
     'export_zip'=>['GET','id','langs','format','compact'],
   );
   
+  function html(&$input)
+  {
+    $type = gettype($input);
+    if ($type == 'string')
+      return htmlentities($input);
+    if ($type == 'array')
+    {
+      foreach ($input as $k => $v)
+      {
+        $input[$k] = html($v);
+      }
+    }
+    return $input;
+  }
+  
   function validate($input, $expected)
   {
     global $fields, $langs;
     $out = null;
     $type = gettype($input);
-    if ($type == 'string' or $type == 'integer')
+    if ($type == 'string' or $type == 'integer' or $type == 'boolean')
     {
-      if ($expected == 'id' or $expected == 'compact')
-        $out = filter_var($input, FILTER_VALIDATE_INT);
-      if ($expected == 'limit')
-        $out = filter_var($input, FILTER_VALIDATE_INT);
-      elseif ($expected == 'string')
-        $out = filter_var($input, FILTER_DEFAULT);
-      elseif ($expected == 'label' or $expected == 'format')
-        $out = filter_var($input, FILTER_DEFAULT);
-      elseif ($expected == 'url')
-        $out = filter_var($input, FILTER_DEFAULT);
-      elseif ($expected == 'lang')
-        if (array_key_exists($input, $langs))
+      switch ($expected)
+      {
+        case 'id':
+        case 'compact':
+        case 'limit':
+          $out = filter_var($input, FILTER_VALIDATE_INT);
+          break;
+        case 'approve':
+          $out = filter_var($input, FILTER_VALIDATE_BOOLEAN);
+          break;
+        case 'lang':
+          if (!array_key_exists($input, $langs))
+            throw new ErrorException('Invalid value:lang');
           $out = $input;
-        else
-          throw new ErrorException('Invalid value:lang');
+          break;
+        case 'name':
+        case 'string':
+        case 'label':
+        case 'format':
+        case 'url':
+          $out = filter_var($input, FILTER_DEFAULT);
+          break;
+      }
     }
     elseif ($type == 'array')
     {
@@ -116,6 +144,9 @@ try
 
     if ($out === null)
       throw new ErrorException('Misdirected Request', 421);
+    
+    html($out);
+    
     $res[] = $out;
   }
   db_close($db);
