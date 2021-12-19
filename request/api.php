@@ -1,0 +1,23 @@
+<?php
+$api = array
+(
+  'get_text',
+  'get_users',
+  'get_stats',
+  'get_path',
+  'set_text',
+  'set_approved',
+  'set_consent',
+  'set_credit',
+  'set_name',
+  'append_term',
+  'set_label',
+  'delete_terms',
+  'delete_me',
+  'group_terms',
+  'auth_login',
+  'auth_logout',
+  'auth_status',
+  'export_text',
+  'export_zip',
+);

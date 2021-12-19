@@ -6,6 +6,8 @@ const base = 'en';
 // url and parameters
 const url = new URL(location.href);
 const params = url.searchParams;
+if (!params.has('c'))
+  params.set('c', 'en-es');
 
 // page
 const page = document.getElementById("page");
@@ -168,8 +170,6 @@ menu.onchange = function() {
 }
 
 
-const fields = ['id','label','locale','string','posted','poster_id','username','count','steam_id'];
-
 var trans = {};
 
 trans.post = function(req, func) {
@@ -205,7 +205,7 @@ trans.remove = function(ids) {
   if (n == 0) return;
   if (confirm('Delete '+n+' items?') != true)
     return;
-  var req = {'func':'delete_terms','ids':ids};
+  var req = {'func':'deleteTerms','ids':ids};
   trans.post([req], function(code, res) {
     // response
     if (code != 200)
@@ -220,7 +220,7 @@ trans.remove = function(ids) {
 trans.setapproved = function(ids, ok) {
   let c = params.get('c');
   c = c.split('-');
-  let action = (ok) ? 'Approve' : 'Unapprove';
+  let action = (ok == 1) ? 'Approve' : 'Unapprove';
   let chosen = [];
   for (let i = 0; i < c.length; i++)
     if (confirm(action+' '+ids.length+' terms in '+locales[c[i]][1]+'?'))
@@ -231,8 +231,9 @@ trans.setapproved = function(ids, ok) {
     //c.splice(index, 1);
   if (ids.length == 0 || chosen.length == 0)
     return;
-  var req = {'func':'set_approved','ids':ids,'langs':chosen,'approve':ok};
+  var req = {'func':'setApproved','ids':ids,'langs':chosen,'approve':ok};
   trans.post([req], function(code, res) {
+console.log(res);
     // response
     if (code != 200)
       return;
@@ -241,11 +242,11 @@ trans.setapproved = function(ids, ok) {
 }
 
 trans.approve = function(ids) {
-  trans.setapproved(ids, true);
+  trans.setapproved(ids, 1);
 }
 
 trans.unapprove = function(ids) {
-  trans.setapproved(ids, false);
+  trans.setapproved(ids, 0);
 }
 
 trans.group = function(ids) {
@@ -253,19 +254,22 @@ trans.group = function(ids) {
   let pid = params.get('r');
   if (ids.indexOf(pid) != -1)
     return;
-  var req = {'func':'group_terms','ids':ids};
+  var req = {'func':'groupTerms','ids':ids};
   trans.post([req], function(code, res) {
     trans.load();
   });
 }
 
 trans.create = function(pid) {
-  var req = {'func':'append_term','id':pid,'label':''};
-  trans.post([req], function(code, res) {
+  var req = {'func':'appendTerm','parent_id':pid,'label':''};
+  trans.post([req], function(code, res) { 
     if (code != 200) return;
     var json = JSON.parse(res);
     var id = json[0];
     trans.row(id);
+
+    var div = table.tBodies[0];
+    div.scrollTop = div.scrollHeight - div.clientHeight;
   });
 }
 
@@ -276,7 +280,7 @@ trans.expo = function(format) {
   let list = format.split(',');
   let zip = list[1] == 'zip';
   format = list[0];
-  let func = (zip) ? 'export_zip' : 'export_text';
+  let func = (zip) ? 'exportZIP' : 'exportText';
   let req = {'func':func,'id':r,'langs':c,'format':format,'compact':2};
   let query = JSON.stringify([req]);
   window.location.href = 'request/?q='+query;
@@ -284,8 +288,8 @@ trans.expo = function(format) {
 
 trans.signin = function() {
   params.delete('s');
-  var req = [{'func':'auth_login','url':url.pathname+url.search}];
-  trans.get(req, function(code, res) {
+  var req = {'func':'login','url':url.pathname+url.search};
+  trans.get([req], function(code, res) {
     if (code == 200) {
       let json = JSON.parse(res);
       window.location.href = json[0];
@@ -295,7 +299,7 @@ trans.signin = function() {
 
 trans.signout = function() {
   // request
-  let req = { 'func':'auth_logout' };
+  let req = { 'func':'logout' };
   trans.post([req], function(code, res) {
     // response
     params.delete('s');
@@ -316,113 +320,8 @@ trans.error = function(code, msg) {
   let out = String(msg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');;
   let div = document.createElement('DIV');
   div.className = 'padded';
-  div.innerHTML = out;
+  div.textContent = out;
   trans.page(title, title, div);
-}
-
-trans.stats = function(pid, replace) {
-  params.set('r', pid);
-  params.delete('c');
-  let st = { eval:`javascript:trans.stats(${pid}, true);` };
-  let func = (replace) ? 'replaceState' : 'pushState';
-  window.history[func](st, '', url.pathname+url.search);
-
-  var req = [
-    // stats
-    { 'func':'get_stats','id':pid },
-    // path
-    { 'func':'get_path','id':pid },
-    // title
-    { 'func':'get_text', 'id':pid, 'fields':fields, 'langs':[base], limit:1 }  
-  ];
-  
-  trans.get(req, function(code, res) {
-    let json = JSON.parse(res);
-    if (code != 200) {
-      let msg = (json) ? json[0] : '';
-      trans.error(code, msg);
-      return;
-    }
-    
-    // document title
-    let header = 'Game Translation';
-    let title = header;
-
-    if (pid != 0) {
-      let h = json[2][0].string;
-      //let u = json[1][0].parent_id;
-      //let back = `javascript:trans.stats(${u}, false)`;
-      //header = `<a href='${back}'><img src="img/back.png" alt="Back" class="icon"></a> ${h}`;
-      header = `${h}`;
-      title = `${h} - ${title}`;
-    }
-
-    // build page
-    let body = document.createElement('SPAN');
-    let list = trans.progress(pid, json[0]);
-    body.appendChild(list);
-    trans.page(title, header, body);
-  });
-}
-
-trans.progress = function(pid, list) {
-  let div = document.createElement('DIV');
-  let br = document.createElement('BR');
-  div.appendChild(br);
-  
-  // remove unsupported locales
-  for (let i = list.length - 1; i >= 0; i--) {
-    let v = list[i];
-    if (!locales[v.locale])
-      list.splice(i, 1);
-  }
-
-  // add blank locales
-  for (let k in locales) {
-    let exists = false;
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].locale == k) {
-        exists = true;
-        break;
-      }
-    }
-    if (!exists)
-      list.push({ locale:k, count:0, updated:null });
-  }
-
-  let max = 0;
-  for (let i = 0; i < list.length; i++)
-    max = Math.max(max, list[i].count);
-
-  for (let i = 0; i < list.length; i++) {
-    let v = list[i];
-    let e = document.createElement('DIV');
-    e.className = "column nowrap right";
-    e.style["width"] = "25%";
-
-    let n = locales[v.locale][0];
-    e.innerHTML = `<b><a href='javascript:trans.edit(${pid}, ["en","${v.locale}"], false)'>${n}</a></b>&nbsp;`;
-    div.appendChild(e);
-    
-    let p = document.createElement('DIV');
-    p.className = "column nowrap";
-    p.style["width"] = "50%";
-    let perc = Math.floor(v.count/max*100);
-    let sperc = (perc > 10) ? perc+'%' : '&nbsp;';
-    p.innerHTML = `<div style="width:${perc}%" class="progress">${sperc}</div>`;
-    div.appendChild(p);
-
-    let t = document.createElement('DIV');
-    t.className = "column nowrap small";
-    t.style["width"] = "25%";
-    t.innerHTML = '&nbsp;'+timediff(v.updated);
-    div.appendChild(t);
-
-    let br = document.createElement('BR');
-    br.style["clear"] = "both";
-    div.appendChild(br);
-  }
-  return div;
 }
 
 trans.edit = function(pid, langs, replace) {
@@ -439,11 +338,11 @@ trans.edit = function(pid, langs, replace) {
     rlangs.push(base);
   let req = [
     // text
-    { 'func':'get_text', 'id':pid, 'fields':fields, 'langs':rlangs, limit:10000 },
+    { 'func':'getTexts', 'id':pid, 'langs':rlangs },
     // path
-    { 'func':'get_path','id':pid },
+    { 'func':'getPath','id':pid },
     // title
-    { 'func':'get_text', 'id':pid, 'fields':fields, 'langs':[base], limit:1 }
+    { 'func':'getTexts', 'id':pid, 'langs':[base] }
   ];
   
   trans.get(req, function(code, res) {
@@ -457,19 +356,33 @@ trans.edit = function(pid, langs, replace) {
     // document title
     let header = 'Game Translation';
     let title = header;
-    if (pid != 0) {
-      // let parent = json[1][0].parent_id;
-      let h = json[2][0].string;
-      let back = `javascript:trans.stats(${pid}, false)`;
-      header = `<a href='${back}'><img src="img/back.png" alt="Back" class="icon"></a> ${h}`;
-      title = `${h} - ${title}`;
+    let path = json[1];
+    if (path && path.length > 0) {
+      let parent = path[path.length - 1].parent_id;
+      let head = json[2][0].string;
+      header = trans.breadcrumbs(head, `javascript:trans.edit(${parent}, ${cc}, false)`);
+      title = `${head} - ${title}`;
     }
     // build page
-    let body = document.createElement('DIV');
+    let cont = document.createElement('DIV');
     trans.table(pid, langs, json[0]);
-    body.appendChild(table);
-    trans.page(title, header, body);
+    cont.appendChild(table);
+    trans.page(title, header, cont);
   });
+}
+
+trans.breadcrumbs = function(title, link) {
+  let img = document.createElement('IMG');
+  img.src = 'img/back.png';
+  img.alt = 'Back';
+  img.className = 'icon';
+  let back = document.createElement('A');
+  back.href = link;
+  back.appendChild(img);
+  let span = document.createElement('SPAN');
+  span.appendChild(back);
+  span.appendChild(document.createTextNode(title));
+  return span;
 }
 
 trans.profile = function(replace) {
@@ -480,32 +393,32 @@ trans.profile = function(replace) {
   window.history[func](st, '', url.pathname+url.search);
 
   let title = 'Edit Profile';
-  let header = `<a href='javascript:trans.stats(0, false);'><img src="img/back.png" alt="Back" class="icon"></a> Profile`;
-  let body = document.createElement('DIV');
+  let header = trans.breadcrumbs('Profile', 'javascript:trans.edit(0, ["en","es"], false);');
+  let cont = document.createElement('DIV');
   let consent = (user.consent) ? 'checked' : '';
   let credit = (user.credit) ? 'checked' : '';
   let name = user.name ? user.name : '';
-  body.innerHTML = `
+  cont.innerHTML = `
     <div class="padded">
-      <h2>Do you grant permission for publishing your contributions?</h2>
+      <h2>Allow the use of your translations?</h2>
       <h4 id="consent_header" class="padded">
-        <input type="checkbox" ${consent} id="consent" onclick="trans.syncme();"> I declare that my contributions do not contain copyrighted material or personal information (required)
+        <input type="checkbox" ${consent} id="consent" onclick="trans.syncme();"> I grant permission and royalty-free license for the use, modification, publication and distribution of all textual content that I contribute to 2dengine. Furthermore, I declare that my contributions do not infringe upon the rights of any third party and do not contain any material that violates local or international law. (required)
       </h4>
 
-      <h2>Would you like to be credited publicly?</h2>
-      <b>Credits name or nickname</b><br>
+      <h2>How would you like to be credited?</h2>
+      <b>Credits alias or pseudonym</b><br>
       <input type="text" value="${name}" id="name" class="padded" onkeydown="trans.syncme();" onchange="trans.syncme();"></input>
       <h4 class="padded">
-        <input type="checkbox" ${credit} id="credit" onclick="trans.syncme();"> I consent to the use of the name specified above publicly in games, applications and on the web (optional)
+        <input type="checkbox" ${credit} id="credit" onclick="trans.syncme();"> I consent to the "alias" or "pseudonym" specified above being displayed publicly in games or other projects developed by 2dengine. (optional)
       </h4>
       
       <h2>Changed your mind?</h2>
       <div class="padded">
-        <b>You can permanently <a href="javascript:trans.deleteme();">delete account</a> and remove your contributions at any time.</b>
+        <b>You can permanently <a href="javascript:trans.unregister();">delete account</a> and remove your contributions at any time.</b>
       </div>
     </div>
   `;
-  trans.page(title, header, body);
+  trans.page(title, header, cont);
   const consent_header = document.getElementById('consent_header');
   if (!user.consent)
     consent_header.className = 'padded error';
@@ -516,9 +429,9 @@ trans.syncme = function(e) {
   const check2 = document.getElementById('credit');
   const name = document.getElementById('name');
   var req = [    
-    {'func':'set_consent','approve':check1.checked},
-    {'func':'set_credit','approve':check2.checked},
-    {'func':'set_name','name':name.value}
+    {'func':'setConsent','approve':check1.checked ? 1 : 0},
+    {'func':'setCredit','approve':check2.checked ? 1 : 0},
+    {'func':'setName','name':name.value}
   ];
   trans.post(req, function(code, res) {
     // response
@@ -532,17 +445,12 @@ trans.syncme = function(e) {
   });
 }
 
-trans.credit = function(e) {
-  e.disabled = true;
-  var req = {'func':'set_credit','approve':e.checked};
-}
-
-trans.deleteme = function() {
+trans.unregister = function() {
   if (!confirm("Delete your account and contributions?"))
     return;
   let verify = prompt("Please type in the word \"delete\" to delete your account and permanently remove your contributions");
   if (verify && verify == "delete") {
-    var req = {'func':'delete_me'};
+    var req = {'func':'unregister'};
     trans.post([req], function(code, res) {
       // response
       if (code != 200)
@@ -554,7 +462,7 @@ trans.deleteme = function() {
   }
 }
 
-trans.page = function(title, header, body) {
+trans.page = function(title, header, cont) {
   // page title
   document.title = title;
   // content
@@ -562,18 +470,17 @@ trans.page = function(title, header, body) {
     page.removeChild(page.firstChild);
   // auth
   let login = document.createElement('DIV');
-  login.style['float'] = 'right';
-  login.style['text-align'] = 'right';
-  login.style['width'] = '200px';
+  login.className = 'login';
 
   // avatar image and username
   let avatar = user.avatar;
   if (!avatar)
     avatar = 'img/nouser.jpg';
+  let username = user.username.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   let profile = 'javascript:trans.profile(false);';
   if (!user.user_id)
     profile = 'javascript:trans.auth();';
-  login.innerHTML = `<a href="${profile}"><img src="${avatar}" class="avatar" alt="Steam Avatar"></a> <b>${user.username}</b><br>`;
+  login.innerHTML = `<a href="${profile}"><img src="${avatar}" class="avatar" alt="Steam Avatar"></a> <b>${username}</b><br>`;
   if (!user.user_id)
     login.innerHTML += `<a href="javascript:trans.auth();">Sign-in</a>`;
   else
@@ -582,7 +489,10 @@ trans.page = function(title, header, body) {
   // header
   let h1 = document.createElement('H1');
   //h1.style['border'] = '1px solid black';
-  h1.innerHTML = header;
+  if (typeof header === 'string' || header instanceof String)
+    h1.textContent = header;
+  else
+    h1.innerHTML = header.innerHTML;
   
   let head = document.createElement('DIV');
   head.className = 'header';
@@ -591,16 +501,10 @@ trans.page = function(title, header, body) {
   page.appendChild(head);
   
   // body
-  body.className = 'body';
-  page.appendChild(body);
-  /*
-  let foot = document.createElement('DIV');
-  foot.className = 'footer';
-  foot.innerHTML = `Powered by <a href="https://bitbucket.org/itraykov/phptranslate/">phpTranslate</a>
-  <div style="float:right"><a href="/">2dengine.com</a> © 2021</div>`;
-  
-  page.appendChild(foot);
-  */
+  cont.className = 'content';
+  page.appendChild(cont);
+
+  trans.resize();
 }
 
 trans.selection = function(state) {
@@ -639,13 +543,12 @@ trans.row = function(id, data) {
   tbody.appendChild(tr);
   let isfirst = tbody.firstChild == tr;
   // checkbox
+  let cb = document.createElement('TD');
+  tr.appendChild(cb);
   if (user.admin) {
-    let flag = isfirst;
-    let td = document.createElement('TD');
-    tr.appendChild(td);
-    td.className = 'checkbox';
     tr.setAttribute('data-selected', 'false');
-    td.setAttribute('data-href', `javascript:trans.toggle(${id}, ${flag});`);
+    cb.className = 'checkbox';
+    cb.setAttribute('data-href', `javascript:trans.toggle(${id}, ${isfirst});`);
   }
   // strings
   let cells = table.tHead.rows[0].cells;
@@ -658,22 +561,25 @@ trans.row = function(id, data) {
     let v = (data) ? data[h][id] : null;
     if (v) {
       //td.appendChild(document.createTextNode(v.string));
-      td.innerHTML = v.string;
+      td.textContent = v.string;
       if (v.posted && v.string) {
         td.title = timediff(v.posted);
         if (user.admin)
           td.title = (v.username || 'anonymous') + '\n' + td.title;
       }
     }
-    td.setAttribute('data-href', `javascript:trans.select(${id}, '${i}');`);
-    // cell colors
-    let e = (v && v.id && data) ? data[base][v.id] : null;
-    if (!v || !v.string)
-      td.className = 'error'; // missing
-    else if (e && v.posted < e.posted)
-      td.className = 'warning'; // older than English version
-    else if (e)
-      td.className = 'text'; // good
+    if (h != 'label' || user.admin)
+      td.setAttribute('data-href', `javascript:trans.select(${id}, '${i}');`);
+    if (h != 'label') {
+      // cell colors
+      let e = (v && v.id && data) ? data[base][v.id] : null;
+      if (!v || !v.string)
+        td.className = 'error'; // missing
+      else if (e && v.posted < e.posted)
+        td.className = 'warning'; // older than English version
+      else if (e)
+        td.className = 'text'; // good
+    }
   }
 
   // more link
@@ -686,7 +592,7 @@ trans.row = function(id, data) {
     langs = langs.replace(/,/g,'-').split('-');
     let cc = '["'+langs.join('","')+'"]';
     td.className = 'group';
-    td.innerHTML = v.count+' more';
+    td.textContent = v.count+' more';
     //td.setAttribute('data-href', `javascript:params.set("r",${id}); trans.load();`);
     td.setAttribute('data-href', `javascript:trans.edit(${id}, ${cc}, false);`);
   }
@@ -723,23 +629,10 @@ trans.table = function(pid, langs, rows) {
     if (v.locale)
       data[v.locale][v.id] = v;
   }
-  // contributors
-  let contrib = {};
-  for (let k in data)
-    contrib[k] = {};
-  for (let i = 0; i < rows.length; i++) {
-    let v = rows[i];
-    let p = v.poster_id;
-    if (p == null)
-      continue;
-    let w = contrib[v.locale];
-    if (w[p] == null)
-      w[p] = { count:0, poster_id:v.poster_id, steam_id:v.steam_id, username:v.username };
-    w[p].count ++;
-  }
+
   // cells
   let cols = [...langs];
-  if (user.admin)
+  //if (user.admin)
     cols.unshift('label');
   
   // rebuild table
@@ -751,14 +644,24 @@ trans.table = function(pid, langs, rows) {
   table.appendChild(thead);
   let tr = document.createElement('TR');
   thead.appendChild(tr);
-  if (user.admin)
-    tr.appendChild(document.createElement('TD'));
+  //if (user.admin) {
+    let th = tr.appendChild(document.createElement('TH'));
+    th.className = 'checkbox';
+  //}
   let n = 0;
   for (let i = 0; i < cols.length; i++) {
     let h = cols[i];
     let th = document.createElement('TH');
     th.headers = h;
     tr.appendChild(th);
+    if (h == 'label' && user.admin) {
+      let button = document.createElement('BUTTON');
+      button.onclick = function() {
+        trans.create(pid);
+      }
+      button.textContent = 'Create';
+      th.appendChild(button);      
+    }
     if (!locales[h])
       continue;
     // language selector
@@ -780,7 +683,11 @@ trans.table = function(pid, langs, rows) {
     n ++;
   }
   let blank = document.createElement('TD');
+  if (user.admin)
+    blank.appendChild(menu);
   tr.appendChild(blank);
+  
+  menu.sync();
 
   // table body
   let tbody = document.createElement('TBODY');
@@ -789,58 +696,6 @@ trans.table = function(pid, langs, rows) {
     let id = ids[j];
     trans.row(id, data);
   }
-  
-  // list of contributors
-  if (user.admin) {
-    let cells = thead.rows[0].cells;
-    let tfoot = document.createElement('TFOOT');
-    table.appendChild(tfoot);
-    
-    let fr = document.createElement('TR');
-    tfoot.appendChild(fr);
-    let td1 = document.createElement('TD');
-    fr.appendChild(td1);
-    
-    let td2 = document.createElement('TD');
-    td2.appendChild(menu);
-    fr.appendChild(td2);
-    
-    let td3 = document.createElement('TD');
-    fr.appendChild(td3);
-    td3.style["background-color"] = "red";
-    td3.colSpan = cols.length - 1;
-
-    let button = document.createElement('BUTTON');
-    button.onclick = function() {
-      trans.create(pid);
-    }
-    button.innerHTML = 'Create';
-    td3.appendChild(button);
-    
-    menu.sync();
-    
-    let fr2 = document.createElement('TR');
-    tfoot.appendChild(fr2);
-    for (let i = 0; i < cells.length; i++) {
-      let h = cells[i].headers;
-      let td = document.createElement('TD');
-      fr2.appendChild(td);
-      if (h && locales[h]) {
-        let users = [];
-        for (let k in contrib[h]) {
-          let u = contrib[h][k];
-          if (k > 0)
-            users.push(`<a href="http://steamcommunity.com/profiles/${u.steam_id}">${u.username}</a> (${u.count})`);
-          else
-            users.push(`anonymous (${u.count})`);
-        }
-        if (users.length > 0) {
-          td.className = 'posts small';
-          td.innerHTML = users.join(", ");
-        }
-      }
-    }
-  }
 }
 
 trans.select = function(id, c) {
@@ -848,7 +703,7 @@ trans.select = function(id, c) {
     trans.auth();
     return;
   }
-  if (!user.consent) {
+  if (user.session && !user.consent) {
     trans.profile();
     return;
   }
@@ -904,9 +759,9 @@ trans.deselect = function(update)
   // request
   let req = null;
   if (header == 'label')
-    req = {'func':'set_label','id':tr.id,'label':u};
+    req = {'func':'setLabel','id':tr.id,'label':u};
   else
-    req = {'func':'set_text','id':tr.id,'lang':header,'string':u};
+    req = {'func':'setText','id':tr.id,'lang':header,'string':u};
   
   trans.post([req], function(code, res) {
     // unlock
@@ -919,36 +774,51 @@ trans.deselect = function(update)
   });
 }
 
+trans.resize = function() {
+  if (!table.rows[0])
+    return;
+  let n = table.rows[0].cells.length - 1;
+  let size = (95/n)+'vw';
+  //if (user.admin)
+    //size = (95/(ncols - 1))+'vw';
+  for (let i = 0, row; row = table.rows[i]; i++) {
+    for (let j = 0, col; col = row.cells[j]; j++) {
+      let s = size;
+      if (j == 0)
+        s = '5vw';
+      col.style['width'] = s;
+      col.style['min-width'] = s;
+      col.style['max-width'] = s;
+    }
+  }
+}
+
 trans.load = function() {
   if (!user)
     user = { user_id:0, username:'anonymous', session:0 };
-  user.admin = (user.user_id == 1);
+  user.admin = user.admin == '1';
 
   let rid = params.get('r');
   if (rid == null)
     rid = 0;
-  
+
   if (rid == 'profile' || !user.consent) {
-    trans.profile(true);
-    return;
+    if (user.session) {
+      trans.profile(true);
+      return;
+    }
   }
   let langs = params.get('c');
-  if (langs) {
-    // edit specified languages
-    langs = langs.replace(/,/g,'-').split('-');
-    trans.edit(rid, langs, true);
-  } else {
-    // general language overview
-    trans.stats(rid, true);
-  }
+  // edit specified languages
+  langs = langs.replace(/,/g,'-').split('-');
+  trans.edit(rid, langs, true);
 }
 
 // logged in?
 let session = params.get('s');
 if (session) {
   // validate session
-  let req = [{'func':'auth_status','id':session}];
-  
+  let req = [{'func':'getUser','session':session}];
   trans.get(req, function(code, res) {
     if (code == 200) {
       let json = JSON.parse(res);
