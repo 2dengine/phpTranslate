@@ -202,7 +202,7 @@ function export_text_to_lua($rows, $langs, $compact = 0)
       $v = ($v !== null) ? '"'.addcslashes($v, '"').'"' : 'nil';
       //$v = preg_replace("/[\n\r]/", "\\n", $v);
       //$v = str_replace("\\\\", "\\", $v);
-      if ($compact == 0 or !preg_match('/^[a-zA-Z0-9_]+$/', $k))
+      if ($compact == 0 or !preg_match('/^[a-zA-Z_][a-zA-Z0-9_]+$/', $k))
       {
         $k = addcslashes($k, "'\\");
         $k = "['$k']";

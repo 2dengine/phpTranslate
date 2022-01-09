@@ -11,10 +11,24 @@
   <meta name="rating" content="general" />
   <script type="text/javascript" src="js/locales.js"></script>
   <script type="text/javascript" src="js/timediff.js"></script>
+  <script type="text/javascript" src="js/table.js"></script>
+  <script type="text/javascript" src="js/project.js"></script>
   <link rel="stylesheet" href="style.css" type="text/css" />
   <title>Game Translation</title>
 </head>
 <body>
+  <div id="header">
+    <div id="login">
+      <a href="javascript:trans.auth();" class="profile">
+        <img src="img/nouser.jpg" class="avatar" alt="Avatar">
+      </a>
+      <b id="username"></b><br>
+      <a href="javascript:trans.auth();" class="profile" id="action"></a>
+    </div>
+    <div id="title">
+    </div>
+  </div>
+  
   <div id="page"></div>
 
   <div id="modal">

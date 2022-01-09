@@ -45,7 +45,7 @@ catch (ErrorException $e) {
   $msg = $e->GetMessage();
   http_response_code($code);
   if ($code >= 500)
-    error_log($msg."\r\n", 3, 'error.log');
+    error_log($msg."\r\n", 3, '../cache/error.log');
   $res = [$msg];
 }
 echo json_encode($res);

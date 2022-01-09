@@ -20,14 +20,36 @@ class API {
   function getUser($session) {
     $session = mysqli_real_escape_string($this->db, $session);
     $user_ip = mysqli_real_escape_string($this->db, $_SERVER['REMOTE_ADDR']);
-    $res = $this->query("SELECT user_id,session,admin,username,avatar,consent,consent_stamp,credit,credit_stamp,name
+    $userdata = 'user_id,session,admin,username,avatar,UNIX_TIMESTAMP(consent) AS consent,alias';
+    $res = $this->query("SELECT $userdata
       FROM `users`
       WHERE session = '$session'
         AND user_ip = INET6_ATON('$user_ip')");
+    if (DEBUG)
+      $res = $this->query("SELECT $userdata FROM `users` WHERE user_id = 1");
     if ($res and mysqli_num_rows($res))
       return mysqli_fetch_assoc($res);
   }
-
+/*
+  function getStats($parent_id) {
+    $res = $this->query("SELECT r.locale,
+        COUNT(r.term_id) AS count,
+        UNIX_TIMESTAMP(MAX(r.posted)) AS updated
+      FROM `terms`
+      LEFT JOIN `revisions` AS r
+        ON r.term_id = id
+      LEFT OUTER JOIN `revisions` AS r2
+        ON r.term_id = r2.term_id
+        AND r.locale = r2.locale
+        AND r.posted < r2.posted
+      WHERE
+        ISNULL(r2.posted)
+        AND (id = $parent_id OR parent_id = $parent_id)
+      GROUP BY r.locale
+      ORDER BY count DESC, updated DESC");
+    return mysqli_fetch_all($res, MYSQLI_ASSOC);
+  }
+*/
   function login($user_id) {
     if (!$user_id) return 0;
     $user_ip = mysqli_real_escape_string($this->db, $_SERVER['REMOTE_ADDR']);
@@ -48,12 +70,12 @@ class API {
   function logout() {
     if (!$this->user)
       return false;
-    $user_id = $this->user['id'];
+    $user_id = $this->user['user_id'];
     $res = $this->query("UPDATE `users`
       SET session = NULL
       WHERE user_id = $user_id");
-    if (!$res or !mysqli_affected_rows($res))
-      return false;
+    //if (!$res or !mysqli_affected_rows($res))
+      //return false;
     return true;
   }
 
@@ -82,14 +104,19 @@ class API {
     $this->query("DELETE FROM `users` WHERE user_id = $owner_id");
     return true;
   }
-  
-  function getTerms($ids) {
+
+  function getTerms($ids, $children = false) {
     $set = implode(',', $ids);
-    $res = $this->query("SELECT id,parent_id,label,owner_id
+    $fields = 'id,parent_id,label,owner_id,UNIX_TIMESTAMP(created) AS created,(SELECT COUNT(*) FROM `terms` AS c WHERE c.parent_id = t.id) AS count,alias,username';
+    if ($this->user and $this->user['admin'])
+      $fields .= ',steam_id';
+    $where = ($children) ? "t.id IN ($set) OR t.parent_id IN ($set)" : "t.id IN ($set)";
+    $res = $this->query("SELECT $fields
       FROM `terms` AS t
-      WHERE id IN ($set)");
-    if (mysqli_num_rows($res) != count($ids))
-      throw new ErrorException('Partial or missing results', 403);
+      LEFT JOIN `users` AS u
+        ON t.owner_id = u.user_id
+      WHERE $where
+      ORDER BY id");
     return mysqli_fetch_all($res, MYSQLI_ASSOC);
   }
   
@@ -103,31 +130,29 @@ class API {
     return $path;
   }
   
-  function getTexts($id, $langs, $fields = null) {
-    if (!$fields) {
-      // do not include personal data unless admin
-      $fields = 'id,label,r.locale,r.string,UNIX_TIMESTAMP(r.posted) AS posted,r.poster_id,r.approved';
-      if ($this->user and $this->user['admin'])
-        $fields .= ',username,steam_id';
-    }
-    $set = '"'.implode('","', $langs).'"';
+  function getTexts($ids, $langs, $children = false) {
+    $set = implode(',', $ids);
+    $where = ($children) ? "t.id IN ($set) OR t.parent_id IN ($set)" : "t.id IN ($set)";
+    // do not include personal data unless admin
+    $fields = 'id,label,r.locale,r.string,UNIX_TIMESTAMP(r.posted) AS posted,r.poster_id,r.approved,alias,username';
+    if ($this->user and $this->user['admin'])
+      $fields .= ',steam_id';
+    $langs = '"'.implode('","', $langs).'"';
     $res = $this->query(
-    "SELECT SQL_CALC_FOUND_ROWS $fields,(SELECT COUNT(*) FROM `terms` AS c WHERE c.parent_id = t.id) AS count
-      FROM `terms` AS t
-      LEFT JOIN `revisions` AS r
-        ON r.term_id = t.id
-        AND r.locale IN ($set)
-      LEFT OUTER JOIN `revisions` AS r2
-        ON (r.term_id = r2.term_id)
-        AND (r.locale = r2.locale)
-        AND (r.posted < r2.posted)
-      LEFT JOIN `users` u
-        ON r.poster_id = u.user_id
-      WHERE
-        ISNULL(r2.posted)
-        AND (t.id = $id OR t.parent_id = $id)
-      ORDER BY FIELD(t.id, $id) DESC, t.id ASC
-      LIMIT 1000");
+    "SELECT SQL_CALC_FOUND_ROWS $fields
+    FROM `terms` AS t
+    RIGHT JOIN `revisions` AS r
+      ON r.term_id = t.id
+      AND r.locale IN ($langs)
+    LEFT OUTER JOIN `revisions` AS r2
+      ON (r.term_id = r2.term_id)
+      AND (r.locale = r2.locale)
+      AND (r.posted < r2.posted)
+    LEFT JOIN `users` u
+      ON r.poster_id = u.user_id
+    WHERE
+      ISNULL(r2.posted)
+      AND ($where)");
     return mysqli_fetch_all($res, MYSQLI_ASSOC);
   }
 
@@ -136,7 +161,7 @@ class API {
       return false;
     if ($this->user['admin'])
       return true;
-    $terms = $this->getTerms($ids);
+    $terms = $this->getTerms($ids, false);
     foreach ($terms as $v)
       if ($v['owner_id'] != $this->user['user_id'])
         return false;
@@ -144,7 +169,10 @@ class API {
   }
   
   function appendTerm($parent_id, $label) {
-    if (!$this->checkPermissions([$parent_id]))
+    if ($parent_id != 0)
+      if (!$this->checkPermissions([$parent_id]))
+        throw new ErrorException('Unauthorized', 401);
+    else if (!$this->user)
       throw new ErrorException('Unauthorized', 401);
     $owner_id = $this->user['user_id'];
     $label = mysqli_real_escape_string($this->db, $label);
@@ -162,7 +190,7 @@ class API {
     $this->query("DELETE FROM `terms`
       WHERE id IN ($set)");
     // remove sub-items
-    while (mysqli_affected_rows($db) > 0)
+    while (mysqli_affected_rows($this->db) > 0)
       $this->query("DELETE a FROM `terms` a
         RIGHT JOIN `terms` b
           ON a.parent_id = b.id
@@ -176,7 +204,7 @@ class API {
     $parent_id = array_shift($ids);
     if (in_array($parent_id, $ids))
       throw new ErrorException('Term cannot be parented by itself', 400);
-    $parent = $this->getTerms([$parent_id])[0];
+    $parent = $this->getTerms([$parent_id], false)[0];
     $ids = implode(',', $ids);
     $this->query("UPDATE `terms`
       SET parent_id = {$parent['id']}
@@ -228,38 +256,37 @@ class API {
       ($id, '$lang', '$string', $poster_id, INET6_ATON('$poster_ip'))");
     return true;
   }
-
-  function setConsent($on) {
-    if (!$this->user)
-      throw new ErrorException('Unauthorized', 401);
-    $owner_id = $this->user['user_id'];
-    $bool = ($on) ? 'TRUE' : 'FALSE';
-    $this->query("UPDATE `users` SET consent = $bool, consent_stamp = NOW() WHERE user_id = $owner_id");
-    return true;
-  }
-
-  function setCredit($on) {
-    if (!$this->user)
-      throw new ErrorException('Unauthorized', 401);
-    $owner_id = $this->user['user_id'];
-    $bool = ($on) ? 'TRUE' : 'FALSE';
-    $this->query("UPDATE `users` SET credit = $bool, credit_stamp = NOW() WHERE user_id = $owner_id");
-    return true;
-  }
-
-  function setName($string) {
-    if (!$this->user)
-      throw new ErrorException('Unauthorized', 401);
-    $owner_id = $this->user['user_id'];
-    $this->query("UPDATE `users` SET name = '$string' WHERE user_id = $owner_id");
-    return true;
-  }
   
+  function requestKeys() {
+    if (!$this->user)
+      throw new ErrorException('Unauthorized', 401);
+    $user_id = $this->user['user_id'];
+    $this->query("UPDATE `steam_keys` SET requested = NOW() WHERE recipient = $user_id");
+    $res = $this->query("SELECT steam_key, project FROM `steam_keys` WHERE recipient = $user_id");
+    return mysqli_fetch_all($res, MYSQLI_ASSOC);
+  }
+
+  function giveConsent() {
+    if (!$this->user)
+      throw new ErrorException('Unauthorized', 401);
+    $owner_id = $this->user['user_id'];
+    $this->query("UPDATE `users` SET consent = NOW() WHERE user_id = $owner_id");
+    return true;
+  }
+
+  function setAlias($string) {
+    if (!$this->user)
+      throw new ErrorException('Unauthorized', 401);
+    $string = mysqli_real_escape_string($this->db, $string);
+    $owner_id = $this->user['user_id'];
+    $this->query("UPDATE `users` SET alias = '$string' WHERE user_id = $owner_id");
+    return true;
+  }
   
   function exportText($id, $langs, $format, $compact) {
     require_once('export.php');
     //$fields = 't.id AS id, t.label AS label, r.locale AS locale, r.string AS string';
-    $rows = $this->getTexts($id, $langs);//, $fields);
+    $rows = $this->getTexts([$id], $langs, true);//, $fields);
     if ($format == 'csv')
       export_text_to_csv($rows, $langs, $compact);
     elseif ($format == 'lua')
@@ -291,8 +318,6 @@ class API {
     $zip->open($file, ZipArchive::OVERWRITE);
     
     require_once('export.php');
-    //$fields = 't.id AS id, t.label AS label, r.locale AS locale, r.string AS string';
-    //$rows = $this->getTexts($id, $langs);//, $fields);
     foreach ($langs as $k => $v)
     {
       $lc = $v;//substr($v, 1, -1);;
@@ -365,9 +390,21 @@ class Getter {
   }
 
   function getTexts($input) {
-    $id = $this->getInteger($input, 'id');
+    $ids = $this->getIds($input, 'ids');
     $langs = $this->getLangs($input);
-    return $this->api->getTexts($id, $langs);
+    $children = $this->getInteger($input, 'children');
+    return $this->api->getTexts($ids, $langs, $children == 1);
+  }
+/*
+  function getStats($input) {
+    $id = $this->getInteger($input, 'id');
+    return $this->api->getStats($id);
+  }
+*/
+  function getTerms($input) {
+    $ids = $this->getIds($input, 'ids');
+    $children = $this->getInteger($input, 'children');
+    return $this->api->getTerms($ids, $children);
   }
 
   function getUser($input) {
@@ -377,7 +414,15 @@ class Getter {
       throw new ErrorException('Session Expired', 440);
     return $user;
   }
-
+  
+  function getPage($input) {
+    $page = $this->getString($input, 'file');
+		$page = preg_replace('/[^a-zA-Z0-9]/', '', $page);
+    $page = "../pages/$page.html";
+    if (!file_exists($page))
+      throw new ErrorException('Page Not Found', 404);
+    return file_get_contents($page);
+  }
 
   function login($input) {
     require_once('openid.php');
@@ -463,22 +508,21 @@ class Poster extends Getter {
   }
   
   function unregister($input) {
-    return $this->api->unregister();
+    $user = $this->getInteger($input, 'user');
+    return $this->api->unregister($user);
   }
   
-  function setConsent($input) {
-    $on = $this->getInteger($input, 'approve');
-    return $this->api->setConsent($on);
+  function giveConsent($input) {
+    return $this->api->giveConsent();
   }
 
-  function setCredit($input) {
-    $on = $this->getInteger($input, 'approve');
-    return $this->api->setCredit($on);
+  function setAlias($input) {
+    $alias = $this->getString($input, 'alias');
+    return $this->api->setAlias($alias);
   }
 
-  function setName($input) {
-    $name = $this->getString($input, 'name');
-    return $this->api->setName($name);
+  function requestKeys($input) {
+    return $this->api->requestKeys();
   }
   
   function setApproved($input) {

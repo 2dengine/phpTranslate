@@ -1,0 +1,26 @@
+<div class="padded">
+  <div id="keys" style="display:none">
+    <h2>Steam Keys</h2>
+    You have been granted the following Steam keys:
+    <pre id="keys_list" class="padded column"></pre>
+  </div>
+
+  <h2>Credits alias or pseudonym</h2>
+  <input type="text" value="" id="alias" class="padded" onkeydown="trans.syncme();" onchange="trans.syncme();"></input>
+  <h4 class="padded">
+    <input type="checkbox" id="credit" onclick="trans.syncme();">
+      I consent to the "alias" or "pseudonym" specified above being displayed publicly in games
+      or other projects developed by 2dengine. (Optional)
+    </input>
+  </h4>
+
+  <h4 id="agreement" class="padded">
+    <input type="checkbox" id="consent" onclick="trans.syncme();">
+      I grant permission and royalty-free license for the use, copying, modification,
+      publication, distribution, sub-licensing and selling of all textual content that I provide to 2dengine.
+      Furthermore, I declare that my contributions do not infringe upon the rights of any
+      third party and do not contain material that violates local or international law.
+    </input>
+  </h4>
+  <b>You can permanently <a href="javascript:trans.unregister();">delete account</a> and remove your contributions at any time.</b>
+</div>

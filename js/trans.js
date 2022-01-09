@@ -6,8 +6,6 @@ const base = 'en';
 // url and parameters
 const url = new URL(location.href);
 const params = url.searchParams;
-if (!params.has('c'))
-  params.set('c', 'en-es');
 
 // page
 const page = document.getElementById("page");
@@ -19,60 +17,6 @@ modal.onclick = function(event) {
     trans.cancel();
 }
 
-// translation table
-var table = document.createElement('TABLE');
-table.id = 'table';
-
-table.onclick = function(e) {
-  let event = e || window.event;
-  let target = event.target || event.srcElement;
-  let url = target.getAttribute('data-href');
-  if (url)
-    window.location.href = url;
-}
-
-table.onkeydown = function(e) {
-  // keyboard shortcuts
-  e = e || window.event;
-  let b = e.which || e.keyCode;
-  let td = input.parentElement;
-  if (!td) return;
-  if (b == 27) {
-    trans.deselect(false);
-    return false;
-  }
-  // advance using tab or enter
-  if (b == 13 || b == 9)
-    b = 40;
-  // move using the arrow keys
-  if (b == 33 || b == 34 || b == 38 || b == 40) {
-    let tr = td.parentElement;
-    let r = tr.sectionRowIndex;
-    let c = td.cellIndex;
-    let rows = tr.parentElement.rows;
-    let n = rows.length - 1;
-
-    if (b == 38 && r > 0)
-      r --; // up
-    else if (b == 40 && r < n)
-      r ++; // down
-    else if (b == 33)
-      r = 0; // page up
-    else if (b == 34)
-      r = n; // page down
-
-    let _tr = rows[r];
-    let _td = _tr.cells[c];
-    if (_td && td != _td && _tr.id != null && _td.headers != null) {
-      for (let j in _tr.cells)
-        if (_tr.cells[j] == _td)
-          trans.select(_tr.id, j);
-    }
-
-    return false;
-  }
-}
-
 // window history (back/forward buttons)
 window.onpopstate = function(e){
   let s = e.state;
@@ -80,99 +24,25 @@ window.onpopstate = function(e){
     eval(s.eval);
 };
 
-// input form
-var input = document.createElement('TEXTAREA');
-
-input.rows = 1;
-input.maxLength = 1000;
-input.tabindex = -1;
-
-input.open = function() {
-  input.focus();
-  if (typeof(input.selectionStart) == 'number') {
-    input.selectionStart = input.selectionEnd = input.value.length;
-  } else {
-    let range = input.createTextRange();
-    range.collapse(false);
-    range.select();
-  }
-  input.resize();
-}
-
-input.resize = function() {
-  let td = input.parentElement;
-  let h = 0;
-  if (td) {
-    input.style.height = 'auto';
-    h = Math.max(td.scrollHeight, input.scrollHeight);
-  }
-  input.style.height = h+'px';
-  input.scrollTop = 0;
-}
-
-input.onscroll = function(e) {
-  input.resize();
-}
-
-input.onkeydown = function(e) {
-  input.resize();
-}
-
-input.onkeyup = function(e) {
-  input.resize();
-}
-
-// menu form
-const formats = {
-  'default': 'Export as...',
-  'csv': 'CSV',
-  'json': 'JSON',
-  'lua': 'Lua',
-  'lua,zip': 'Lua/ZIP',
-  'php': 'PHP',
-  'vdf': 'VDF',
-  'samplar': 'Samplar'
-}
-
-const actions = {
-  'default': 'With selected...',
-  'remove': 'Remove',
-  'group': 'Group',
-  'approve': 'Approve',
-  'unapprove': 'Unapprove'
-}
-
-var menu = document.createElement('SELECT');
-menu.id = 'menu';
-
-menu.sync = function() {
-  let s = trans.selection('true');
-  let list = (s.length > 0) ? actions : formats;
-  while (menu.firstChild)
-    menu.removeChild(menu.firstChild);
-  for (let k in list) {
-    let op = document.createElement('OPTION');
-    if (k == 'default')
-      op.selected = op.hidden = true;
-    menu.appendChild(op);
-    op.caption = op.text = list[k];
-    op.value = k;
-  }
-}
-
-menu.onchange = function() {
-  let s = trans.selection('true');
-  let v = this.value;
-  if (trans[v])
-    trans[v](s);
-  else
-    trans.expo(v);
-}
-
-
 var trans = {};
 
-trans.post = function(req, func) {
+trans.response = function(xhr, func, ignore) {
+  if (xhr.readyState == 4) {
+    let json = null;
+    try { json = JSON.parse(xhr.responseText); } catch(e) {};
+    if (!ignore) {
+      if (xhr.status != 200 || !json) {
+        let msg = (json) ? json[0] : xhr.responseText;
+        trans.error(xhr.status, msg);
+        return;
+      }
+    }
+    func(xhr.status, json);
+  }
+}
+
+trans.post = function(req, func, ignore) {
+  if (req.length == 0) return;
   var query = JSON.stringify(req);
   query = encodeURIComponent(query);
   let session = params.get("s");
@@ -180,13 +50,13 @@ trans.post = function(req, func) {
   xhr.open('POST', 'request/', true);
   xhr.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
   xhr.onreadystatechange = function() {
-    if (xhr.readyState == 4)
-      func(xhr.status, xhr.responseText);
+    trans.response(xhr, func, ignore);
   }
   xhr.send(`&q=${query}&s=${session}`);
 }
 
-trans.get = function(req, func) {
+trans.get = function(req, func, ignore) {
+  if (req.length == 0) return;
   var query = JSON.stringify(req);
   query = encodeURIComponent(query);
   let time = new Date().getTime();
@@ -194,8 +64,7 @@ trans.get = function(req, func) {
   xhr.open('GET', `request/?q=${query}&t=${time}`, true);
   xhr.setRequestHeader('Content-type', 'text/xml');
   xhr.onreadystatechange = function() {
-    if (xhr.readyState == 4)
-      func(xhr.status, xhr.responseText);
+    trans.response(xhr, func, ignore);
   }
   xhr.send();
 }
@@ -205,14 +74,22 @@ trans.remove = function(ids) {
   if (n == 0) return;
   if (confirm('Delete '+n+' items?') != true)
     return;
-  var req = {'func':'deleteTerms','ids':ids};
-  trans.post([req], function(code, res) {
+  let pid = params.get("r");
+  var req =
+  [
+    {'func':'getPath','id':pid},
+    {'func':'deleteTerms','ids':ids}
+  ]
+  trans.post(req, function(code, json) {
     // response
     if (code != 200)
       return;
-    let pid = params.get("r");
-    if (ids.indexOf(pid) != -1)
-      params.delete("r");
+    if (ids.indexOf(pid) != -1) {
+      let langs = params.get('c');
+      langs = langs.replace(/,/g,'-').split('-');
+      trans.edit(json[0][0].id, langs, false);
+      return;
+    }
     trans.load();
   });
 }
@@ -233,7 +110,6 @@ trans.setapproved = function(ids, ok) {
     return;
   var req = {'func':'setApproved','ids':ids,'langs':chosen,'approve':ok};
   trans.post([req], function(code, res) {
-console.log(res);
     // response
     if (code != 200)
       return;
@@ -260,19 +136,6 @@ trans.group = function(ids) {
   });
 }
 
-trans.create = function(pid) {
-  var req = {'func':'appendTerm','parent_id':pid,'label':''};
-  trans.post([req], function(code, res) { 
-    if (code != 200) return;
-    var json = JSON.parse(res);
-    var id = json[0];
-    trans.row(id);
-
-    var div = table.tBodies[0];
-    div.scrollTop = div.scrollHeight - div.clientHeight;
-  });
-}
-
 trans.expo = function(format) {
   let r = params.get('r');
   let c = params.get('c');
@@ -289,9 +152,8 @@ trans.expo = function(format) {
 trans.signin = function() {
   params.delete('s');
   var req = {'func':'login','url':url.pathname+url.search};
-  trans.get([req], function(code, res) {
-    if (code == 200) {
-      let json = JSON.parse(res);
+  trans.get([req], function(code, json) {
+    if (code == 200 && json) {
       window.location.href = json[0];
     }
   });
@@ -301,9 +163,74 @@ trans.signout = function() {
   // request
   let req = { 'func':'logout' };
   trans.post([req], function(code, res) {
-    // response
     params.delete('s');
+    params.delete('r');
     window.location.href = url.href;
+  });
+}
+
+trans.home = function(replace) {
+  // response
+  params.delete('r');
+  params.delete('c');
+  let st = { eval:`javascript:trans.home(true);` };
+  let func = (replace) ? 'replaceState' : 'pushState';
+  window.history[func](st, '', url.pathname+url.search);
+
+  let req = [
+    { 'func':'getTerms', 'ids':[0], 'children':1 },
+    { 'func':'getTexts', 'ids':[0], langs:[base], 'children':1 },
+    { 'func':'getPage', 'file':'home' }
+  ];
+  
+  trans.get(req, function(code, json) {
+    let title = "Common Game Translations";
+    let count = json[0].length;
+    let header = trans.breadcrumbs(title, '../', `${count} projects found`);
+    
+    // build page
+    let cont = document.createElement('DIV');
+    cont.innerHTML = json[2];
+    trans.page(title, header, cont);
+    
+    let main = document.getElementById("projects");
+    for (let i = 0; i < json[0].length; i++) {
+      let v = json[0][i];
+      let div = document.createElement('H3');
+      div.innerHTML = `<img src="img/table.png" alt="Project" />`;
+      let a = document.createElement('A');
+      a.href = `javascript:trans.project(${v.id})`;
+      for (let j = 0; j < json[1].length; j++) {
+        let w = json[1][j];
+        if (w.id == v.id)
+          a.textContent = w.string || w.label || w.id;
+      }
+      div.appendChild(a);
+      let owner = v.alias || v.username || 'anonymous';
+      let span = document.createElement('SPAN');
+      span.textContent = ` by ${owner}`;
+      div.appendChild(span);
+      main.appendChild(div);
+    }
+    if (user && user.user_id != '0') {
+      let admin = document.getElementById('admin');
+      admin.style['display'] = 'block';
+    }
+  });
+}
+
+trans.newProject = function() {
+  let name = prompt("Please enter a project title in English:");
+  if (!name) return;
+  let req = {'func':'appendTerm','parent_id':0,'label':'project'};
+  trans.post([req], function(code, json) { 
+    if (code != 200) return;
+    let id = json[0];
+    let set = {'func':'setText','id':id,'lang':'en','string':name};
+    trans.post([set], function(code, res) {
+      //trans.project(id);
+      trans.edit(id, ['en','en'], false);
+    });
   });
 }
 
@@ -316,62 +243,109 @@ trans.cancel = function() {
 }
 
 trans.error = function(code, msg) {
-  let title = `${code} Error`;
-  let out = String(msg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');;
+  let title = parseInt(code)+' Error';
   let div = document.createElement('DIV');
   div.className = 'padded';
-  div.textContent = out;
+  div.textContent = msg;
   trans.page(title, title, div);
 }
 
+trans.project = function(pid, replace) {
+  params.delete('c');
+  params.set('r', pid);
+  let st = { eval:`javascript:trans.project(${pid}, true);` };
+  let func = (replace) ? 'replaceState' : 'pushState';
+  window.history[func](st, '', url.pathname+url.search);
+
+  let all = [];
+  for (let k in locales)
+    all.push(k);
+
+  let req = [
+    { 'func':'getTerms', 'ids':[pid], 'children':0 },
+    { 'func':'getTexts', 'ids':[pid], langs:[base], 'children':0 },
+    { 'func':'getTexts', 'ids':[pid], langs:all, 'children':1 },
+    { 'func':'getPage', 'file':'project' }
+  ];
+  
+  trans.get(req, function(code, json) {
+    let proj = json[0][0];
+    if (!pid || !proj)
+      return trans.home();
+
+    let title = json[1][0].string;
+    let owner = proj.alias || proj.username;
+    let created = timediff(proj.created);
+    let header = trans.breadcrumbs(title, `javascript:trans.home()`, `Created by ${owner} ${created}`);
+    
+    // build page
+    let cont = document.createElement('DIV');
+    cont.innerHTML = json[3];
+    cont = project.stats(pid, json[2]);
+    trans.page(title, header, cont);
+  });
+}
+
 trans.edit = function(pid, langs, replace) {
+  pid = parseInt(pid);
+  if (!pid) return trans.home();
   params.set('r', pid);
   params.set('c', langs.join('-'));
   let cc = '["'+langs.join('","')+'"]';
   let st = { eval:`javascript:trans.edit(${pid}, ${cc}, true);` };
   let func = (replace) ? 'replaceState' : 'pushState';
   window.history[func](st, '', url.pathname+url.search);
-
   // build
   let rlangs = [...langs];
   if (rlangs.indexOf(base) == -1)
-    rlangs.push(base);
+    rlangs.unshift(base);
   let req = [
-    // text
-    { 'func':'getTexts', 'id':pid, 'langs':rlangs },
-    // path
+    { 'func':'getTerms', 'ids':[pid], 'children':1 },
+    { 'func':'getTexts', 'ids':[pid], 'langs':rlangs, 'children':1 },
     { 'func':'getPath','id':pid },
-    // title
-    { 'func':'getTexts', 'id':pid, 'langs':[base] }
+    { 'func':'getPage', 'file':'table' }
   ];
   
-  trans.get(req, function(code, res) {
-    // response
-    let json = JSON.parse(res);
-    if (code != 200) {
-      let msg = (json) ? json[0] : '';
-      trans.error(code, msg);
-      return;
-    }
+  trans.get(req, function(code, json) {
     // document title
-    let header = 'Game Translation';
+    let header = 'Common Game Translations';
     let title = header;
-    let path = json[1];
+    let proj = json[0][0];
+    if (!proj)
+      return trans.home();
+    let rows = json[1];
+    let path = json[2];
+
     if (path && path.length > 0) {
-      let parent = path[path.length - 1].parent_id;
-      let head = json[2][0].string;
-      header = trans.breadcrumbs(head, `javascript:trans.edit(${parent}, ${cc}, false)`);
+      let parent = parseInt(path[path.length - 1].parent_id);
+      let head = header;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].id == pid && rows[i].locale == base) {
+          head = rows[i].string;
+          break;
+        }
+      }
+      let owner = proj.alias || proj.username;
+      let created = timediff(proj.created);
+      let link;
+      if (parent)
+        link = `javascript:trans.edit(${parent}, ${cc}, false)`;
+      else
+        link = `javascript:trans.project(${pid})`;
+      header = trans.breadcrumbs(head, link, `Created by ${owner} ${created}`);
       title = `${head} - ${title}`;
     }
+
     // build page
     let cont = document.createElement('DIV');
-    trans.table(pid, langs, json[0]);
-    cont.appendChild(table);
+    cont.innerHTML = json[3];
     trans.page(title, header, cont);
+
+    sheet.build(pid, langs, rows, json[0]);
   });
 }
 
-trans.breadcrumbs = function(title, link) {
+trans.breadcrumbs = function(title, link, desc) {
   let img = document.createElement('IMG');
   img.src = 'img/back.png';
   img.alt = 'Back';
@@ -379,10 +353,17 @@ trans.breadcrumbs = function(title, link) {
   let back = document.createElement('A');
   back.href = link;
   back.appendChild(img);
-  let span = document.createElement('SPAN');
-  span.appendChild(back);
-  span.appendChild(document.createTextNode(title));
-  return span;
+  let h1 = document.createElement('H1');
+  h1.appendChild(back);
+  h1.appendChild(document.createTextNode(title));
+  let node = document.createElement('DIV');
+  node.appendChild(h1);
+  if (desc) {
+    if (typeof desc === 'string' || desc instanceof String)
+      desc = document.createTextNode(desc);
+    node.appendChild(desc);
+  }
+  return node;
 }
 
 trans.profile = function(replace) {
@@ -391,57 +372,82 @@ trans.profile = function(replace) {
   let st = { eval:`javascript:trans.profile(true);` };
   let func = (replace) ? 'replaceState' : 'pushState';
   window.history[func](st, '', url.pathname+url.search);
+  
+  let session = params.get('s');
+  var req =
+  [
+    {'func':'getPage','file':'profile'},
+    {'func':'getUser','session':session}
+  ];
+  trans.get(req, function(code, json) {
+    user = json[1];
+    
+    let title = 'Edit Profile';
+    let header = trans.breadcrumbs('Profile', 'javascript:trans.home();', 'Edit your public profile information');
+    let cont = document.createElement('DIV');
+    cont.innerHTML = json[0];
 
-  let title = 'Edit Profile';
-  let header = trans.breadcrumbs('Profile', 'javascript:trans.edit(0, ["en","es"], false);');
-  let cont = document.createElement('DIV');
-  let consent = (user.consent) ? 'checked' : '';
-  let credit = (user.credit) ? 'checked' : '';
-  let name = user.name ? user.name : '';
-  cont.innerHTML = `
-    <div class="padded">
-      <h2>Allow the use of your translations?</h2>
-      <h4 id="consent_header" class="padded">
-        <input type="checkbox" ${consent} id="consent" onclick="trans.syncme();"> I grant permission and royalty-free license for the use, modification, publication and distribution of all textual content that I contribute to 2dengine. Furthermore, I declare that my contributions do not infringe upon the rights of any third party and do not contain any material that violates local or international law. (required)
-      </h4>
+    trans.page(title, header, cont);
 
-      <h2>How would you like to be credited?</h2>
-      <b>Credits alias or pseudonym</b><br>
-      <input type="text" value="${name}" id="name" class="padded" onkeydown="trans.syncme();" onchange="trans.syncme();"></input>
-      <h4 class="padded">
-        <input type="checkbox" ${credit} id="credit" onclick="trans.syncme();"> I consent to the "alias" or "pseudonym" specified above being displayed publicly in games or other projects developed by 2dengine. (optional)
-      </h4>
+    const alias = document.getElementById('alias');
+    const credit = document.getElementById('credit');
+    if (user.alias) {
+      credit.checked = true;
+      alias.value = user.alias; 
+    } else {
+      credit.checked = false;
+      alias.disabled = true;
+    }
+    const agree = document.getElementById('agreement');
+    const cb = document.getElementById('consent');
+    let msg = '';
+    if (!user.consent) {
+      agree.className = 'padded error';
+      msg = '(Required)';
+    } else {
+      cb.checked = true;
+      cb.disabled = true;
+      msg = '(Accepted '+timediff(user.consent)+')';
+    }
+    agree.appendChild(document.createTextNode(msg));
       
-      <h2>Changed your mind?</h2>
-      <div class="padded">
-        <b>You can permanently <a href="javascript:trans.unregister();">delete account</a> and remove your contributions at any time.</b>
-      </div>
-    </div>
-  `;
-  trans.page(title, header, cont);
-  const consent_header = document.getElementById('consent_header');
-  if (!user.consent)
-    consent_header.className = 'padded error';
+    var req = {'func':'requestKeys'};
+    trans.post([req], function(code, json) {
+      let list = json[0];
+      if (list && list.length > 0) {
+        const keys = document.getElementById('keys');
+        const keys_list = document.getElementById('keys_list');
+        keys.style['display'] = 'block';
+        for (let i = 0; i < list.length; i++)
+          keys_list.innerHTML += `<a href="javascript:trans.project(${list[i].project});">${list[i].steam_key}</a>\n`;
+      }
+    });
+  });
 }
 
 trans.syncme = function(e) {
-  const check1 = document.getElementById('consent');
-  const check2 = document.getElementById('credit');
-  const name = document.getElementById('name');
-  var req = [    
-    {'func':'setConsent','approve':check1.checked ? 1 : 0},
-    {'func':'setCredit','approve':check2.checked ? 1 : 0},
-    {'func':'setName','name':name.value}
-  ];
+  let reload = false;
+  let req = [];
+  const consent = document.getElementById('consent');
+  if (!user.consent && consent.checked) {
+    reload = true;
+    req.push({'func':'giveConsent'});
+  }
+  const credit = document.getElementById('credit');
+  const alias = document.getElementById('alias');
+  alias.disabled = !credit.checked;
+  if (alias.value && !credit.checked)
+    alias.value = '';
+  if (user.alias != alias.value)
+    req.push({'func':'setAlias','alias':alias.value});
   trans.post(req, function(code, res) {
     // response
-    if (code != 200)
-      return;
-    user.consent = check1.checked;
-    user.credit = check1.credit;
-    user.name = name.value;
-    const consent_header = document.getElementById('consent_header');
-    consent_header.className = user.consent ? 'padded' : 'error padded';
+    if (reload)
+      trans.profile(true);
+
+    user.alias = alias.value;
+    let u = document.getElementById('username');
+    u.textContent = user.alias || 'anonymous';
   });
 }
 
@@ -450,7 +456,7 @@ trans.unregister = function() {
     return;
   let verify = prompt("Please type in the word \"delete\" to delete your account and permanently remove your contributions");
   if (verify && verify == "delete") {
-    var req = {'func':'unregister'};
+    var req = {'func':'unregister','user':user.user_id};
     trans.post([req], function(code, res) {
       // response
       if (code != 200)
@@ -469,42 +475,47 @@ trans.page = function(title, header, cont) {
   while (page.firstChild)
     page.removeChild(page.firstChild);
   // auth
-  let login = document.createElement('DIV');
-  login.className = 'login';
-
   // avatar image and username
-  let avatar = user.avatar;
-  if (!avatar)
-    avatar = 'img/nouser.jpg';
-  let username = user.username.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-  let profile = 'javascript:trans.profile(false);';
-  if (!user.user_id)
-    profile = 'javascript:trans.auth();';
-  login.innerHTML = `<a href="${profile}"><img src="${avatar}" class="avatar" alt="Steam Avatar"></a> <b>${username}</b><br>`;
-  if (!user.user_id)
-    login.innerHTML += `<a href="javascript:trans.auth();">Sign-in</a>`;
-  else
-    login.innerHTML += `<a href="javascript:trans.signout();">Sign-out</a>`;
+  let avatar = 'img/nouser.jpg';
+  if (user && user.avatar)
+    avatar = user.avatar;
+  var imgs = document.getElementsByClassName("avatar");
+  for (var i = 0; i < imgs.length; i++)
+    imgs.item(i).src = avatar;
+
+  let u = document.getElementById('username');
+  u.textContent = 'anonymous';
+  if (user)
+    u.textContent = user.alias || user.username;
+  let profile = 'javascript:trans.auth();';
+  let link = profile;
+  let anchor = 'Login';
+  if (user && user.user_id != '0') {
+    profile = 'javascript:trans.profile(false);';
+    link = 'javascript:trans.signout();';
+    anchor = 'Logout';
+  }
+  var links = document.getElementsByClassName('profile');
+  for (var i = 0; i < links.length; i++)
+    links.item(i).href = profile;
+  let action = document.getElementById('action');
+  action.textContent = anchor;
+  action.href = link;
 
   // header
-  let h1 = document.createElement('H1');
-  //h1.style['border'] = '1px solid black';
-  if (typeof header === 'string' || header instanceof String)
+  let div = document.getElementById('title');
+  if (typeof header === 'string' || header instanceof String) {
+    let h1 = document.createElement('H1');
     h1.textContent = header;
-  else
-    h1.innerHTML = header.innerHTML;
-  
-  let head = document.createElement('DIV');
-  head.className = 'header';
-  head.appendChild(login);
-  head.appendChild(h1);
-  page.appendChild(head);
-  
-  // body
-  cont.className = 'content';
-  page.appendChild(cont);
+    header = h1;
+  }
+  while (div.firstChild)
+    div.removeChild(div.firstChild);
+  div.appendChild(header);
 
-  trans.resize();
+  // body
+  //cont.className = 'content';
+  page.appendChild(cont);
 }
 
 trans.selection = function(state) {
@@ -536,282 +547,25 @@ trans.toggle = function(pid, flag) {
   menu.sync();
 }
 
-trans.row = function(id, data) {
-  let tr = document.createElement('TR');
-  tr.id = id;
-  let tbody = table.tBodies[0];
-  tbody.appendChild(tr);
-  let isfirst = tbody.firstChild == tr;
-  // checkbox
-  let cb = document.createElement('TD');
-  tr.appendChild(cb);
-  if (user.admin) {
-    tr.setAttribute('data-selected', 'false');
-    cb.className = 'checkbox';
-    cb.setAttribute('data-href', `javascript:trans.toggle(${id}, ${isfirst});`);
-  }
-  // strings
-  let cells = table.tHead.rows[0].cells;
-  for (let i = 0; i < cells.length; i++) {
-    let h = cells[i].headers;
-    if (!h) continue;
-    let td = document.createElement('TD');
-    tr.appendChild(td);
-    td.headers = h;
-    let v = (data) ? data[h][id] : null;
-    if (v) {
-      //td.appendChild(document.createTextNode(v.string));
-      td.textContent = v.string;
-      if (v.posted && v.string) {
-        td.title = timediff(v.posted);
-        if (user.admin)
-          td.title = (v.username || 'anonymous') + '\n' + td.title;
-      }
-    }
-    if (h != 'label' || user.admin)
-      td.setAttribute('data-href', `javascript:trans.select(${id}, '${i}');`);
-    if (h != 'label') {
-      // cell colors
-      let e = (v && v.id && data) ? data[base][v.id] : null;
-      if (!v || !v.string)
-        td.className = 'error'; // missing
-      else if (e && v.posted < e.posted)
-        td.className = 'warning'; // older than English version
-      else if (e)
-        td.className = 'text'; // good
-    }
-  }
-
-  // more link
-  let td = document.createElement('TD');
-  tr.appendChild(td);
-  let v = (data) ? data.label[id] : null;
-  let pid = params.get("r");
-  if (v && v.count > 0 && pid != id) {
-    let langs = params.get('c');
-    langs = langs.replace(/,/g,'-').split('-');
-    let cc = '["'+langs.join('","')+'"]';
-    td.className = 'group';
-    td.textContent = v.count+' more';
-    //td.setAttribute('data-href', `javascript:params.set("r",${id}); trans.load();`);
-    td.setAttribute('data-href', `javascript:trans.edit(${id}, ${cc}, false);`);
-  }
-}
-
-trans.table = function(pid, langs, rows) {
-  // ordered ids
-  let ids = [];
-  for (let i = 0; i < rows.length; i++) {
-    let v = rows[i];
-    if (ids.indexOf(v.id) == -1)
-      ids.push(v.id);
-  }
-  // terms and labels
-  let terms = {};
-  for (let i = 0; i < rows.length; i++) {
-    let v = rows[i];
-    terms[v.id] = { string:v.label, count:v.count };
-  }
-  // arrange as a table
-  let data = {};
-  data.label = {};
-  for (let id in terms)
-    data.label[id] = terms[id];
-  data[base] = {};
-  for (let i = 0; i < langs.length; i++) {
-    let v = langs[i];
-    data[v] = {};
-    for (let k in terms)
-      data[v][k] = null;
-  }
-  for (let i = 0; i < rows.length; i++) {
-    let v = rows[i];
-    if (v.locale)
-      data[v.locale][v.id] = v;
-  }
-
-  // cells
-  let cols = [...langs];
-  //if (user.admin)
-    cols.unshift('label');
-  
-  // rebuild table
-  while (table.firstChild)
-    table.removeChild(table.firstChild);
-
-  // header
-  let thead = document.createElement('THEAD');
-  table.appendChild(thead);
-  let tr = document.createElement('TR');
-  thead.appendChild(tr);
-  //if (user.admin) {
-    let th = tr.appendChild(document.createElement('TH'));
-    th.className = 'checkbox';
-  //}
-  let n = 0;
-  for (let i = 0; i < cols.length; i++) {
-    let h = cols[i];
-    let th = document.createElement('TH');
-    th.headers = h;
-    tr.appendChild(th);
-    if (h == 'label' && user.admin) {
-      let button = document.createElement('BUTTON');
-      button.onclick = function() {
-        trans.create(pid);
-      }
-      button.textContent = 'Create';
-      th.appendChild(button);      
-    }
-    if (!locales[h])
-      continue;
-    // language selector
-    let select = document.createElement('SELECT');
-    th.appendChild(select);
-    for (let c in locales) {
-      let op = document.createElement('OPTION');
-      select.appendChild(op);
-      op.caption = op.text = locales[c][0];
-      op.value = c;
-      op.selected = (h == c)
-    }
-    let nn = n;
-    select.onchange = function() {
-      // switch pages
-      langs[nn] = select.value;
-      trans.edit(pid, langs, false);
-    }
-    n ++;
-  }
-  let blank = document.createElement('TD');
-  if (user.admin)
-    blank.appendChild(menu);
-  tr.appendChild(blank);
-  
-  menu.sync();
-
-  // table body
-  let tbody = document.createElement('TBODY');
-  table.appendChild(tbody);
-  for (let j = 0; j < ids.length; j++) {
-    let id = ids[j];
-    trans.row(id, data);
-  }
-}
-
-trans.select = function(id, c) {
-  if (!user.user_id) {
-    trans.auth();
-    return;
-  }
-  if (user.session && !user.consent) {
-    trans.profile();
-    return;
-  }
-  let tr = document.getElementById(id);
-  let cells = tr.cells;
-  let td = cells[c];
-  let _td = input.parentElement;
-  if (td == _td) return;
-  trans.deselect(true);
-  if (td.parentElement.className == 'busy')
-    return;
-  let txt = '';
-  let first = td.firstChild;
-  if (first && first.nodeType == 3) {
-    txt = first.nodeValue;
-    td.removeChild(first);
-  }
-  input.setAttribute('data-value', txt);
-  td.appendChild(input);
-  input.value = txt;
-  input.open();
-}
-
-trans.deselect = function(update)
-{
-  //menu.close();
-  let td = input.parentElement;
-  while (td && td.tagName != 'TD')
-    td = td.parentElement;
-  if (!td) return;
-  // deselect
-  //td.removeChild(menu);
-  let v = input.getAttribute('data-value');
-  input.setAttribute('data-value', null);
-  input.blur();
-  td.removeChild(input);
-  let node = document.createTextNode(v);
-  td.appendChild(node);
-  let u = input.value;
-  if (!update || u == v) {
-    input.resize();
-    return;
-  }
-  // lock
-  td.className = 'busy';
-  node.nodeValue = u;
-  // column and row
-  let table = td.parentElement;
-  while (table && table.tagName != 'TABLE')
-    table = table.parentElement;
-  let header = td.headers;
-  let tr = td.parentElement;
-  // request
-  let req = null;
-  if (header == 'label')
-    req = {'func':'setLabel','id':tr.id,'label':u};
-  else
-    req = {'func':'setText','id':tr.id,'lang':header,'string':u};
-  
-  trans.post([req], function(code, res) {
-    // unlock
-    node.nodeValue = v;
-    if (code != 200)
-      return;
-    // load
-    node.nodeValue = u;
-    td.className = 'text';
-  });
-}
-
-trans.resize = function() {
-  if (!table.rows[0])
-    return;
-  let n = table.rows[0].cells.length - 1;
-  let size = (95/n)+'vw';
-  //if (user.admin)
-    //size = (95/(ncols - 1))+'vw';
-  for (let i = 0, row; row = table.rows[i]; i++) {
-    for (let j = 0, col; col = row.cells[j]; j++) {
-      let s = size;
-      if (j == 0)
-        s = '5vw';
-      col.style['width'] = s;
-      col.style['min-width'] = s;
-      col.style['max-width'] = s;
-    }
-  }
-}
-
 trans.load = function() {
   if (!user)
-    user = { user_id:0, username:'anonymous', session:0 };
-  user.admin = user.admin == '1';
+    user = { user_id:'0', username:'anonymous', session:0 };
 
   let rid = params.get('r');
   if (rid == null)
     rid = 0;
-
-  if (rid == 'profile' || !user.consent) {
-    if (user.session) {
-      trans.profile(true);
-      return;
-    }
-  }
   let langs = params.get('c');
-  // edit specified languages
-  langs = langs.replace(/,/g,'-').split('-');
-  trans.edit(rid, langs, true);
+
+  if (rid == 'profile' || (user.user_id != '0' && !user.consent)) {
+    trans.profile(true);
+    return;
+  }
+  if (langs) {
+    langs = langs.replace(/,/g,'-').split('-');
+    trans.edit(rid, langs, true);
+    return;
+  }
+  trans.project(rid, true);
 }
 
 // logged in?
@@ -819,17 +573,12 @@ let session = params.get('s');
 if (session) {
   // validate session
   let req = [{'func':'getUser','session':session}];
-  trans.get(req, function(code, res) {
-    if (code == 200) {
-      let json = JSON.parse(res);
-      if (json && json[0]) {
+  trans.get(req, function(code, json) {
+    if (code == 200)
+      if (json && json[0])
         user = json[0];
-        user.consent = user.consent == '1';
-        user.credit = user.credit == '1';
-      }
-    }
     trans.load();
-  });
+  }, true);
 } else {
   // guest
   trans.load();
